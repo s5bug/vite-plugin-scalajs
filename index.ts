@@ -12,39 +12,20 @@ async function printSbtTask(task: string, cwd?: string): Promise<string> {
 
   /* Converts a string to its representation as a Scala string literal, in a
    * way that is safe to use in a shell argument.
-   * On Windows, makes extra effort to avoid any quote or parentheses appearing
-   * in the output, to work around https://github.com/sbt/sbt/issues/9660.
    */
   function scalaString(s: string): string {
-    if (process.platform === 'win32') {
-      // Example: "AB" -> {65::66::Nil}.map{_.toChar}.mkString
-      let result = '{';
-      for (let i = 0; i < s.length; i++) {
-        result += s.charCodeAt(i);
-        result += '::'
-      }
-      result += 'Nil}.map{_.toChar}.mkString';
-      return result;
-    } else {
-      // Escape problematic characters using their \uxxxx representation
-      const escaped = s.replace(/[\u0000- \\"']/g,
-        (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
-      return '"' + escaped + '"';
-    }
+    // Escape problematic characters using their \uxxxx representation
+    const escaped = s.replace(/[\u0000- \\"']/g,
+      (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
+    return '"' + escaped + '"';
   }
 
   try {
-    /* The atrocious incantation in the 'set' argument avoids quotes and
-     * parentheses. This works around https://github.com/sbt/sbt/issues/9660.
-     * To do that, we must only use method calls with exactly 1 argument, which
-     * we can call with {} instead of (), or with no argument list at all.
-     * We abuse the fact that .close works because it's a Java method.
-     */
     const args = [
       "--batch",
       "-no-colors",
       "-Dsbt.supershell=false",
-      `set TaskKey[Unit]{${scalaString('dummy')}} := { val os = java.nio.file.Files.newOutputStream{file{${scalaString(myTmpFile)}}.toPath}; os.write{{${task}}.value.toString.getBytes{java.nio.charset.StandardCharsets.UTF_8}}; os.close }`,
+      `set TaskKey[Unit](${scalaString('dummy')}) := sbt.IO.write(file(${scalaString(myTmpFile)}), (${task}).value.toString, java.nio.charset.StandardCharsets.UTF_8)`,
       "dummy"
     ];
     const options: SpawnOptions = {
@@ -52,7 +33,7 @@ async function printSbtTask(task: string, cwd?: string): Promise<string> {
       stdio: ['ignore', 'pipe', 'inherit'],
     };
     const child = process.platform === 'win32'
-        ? spawn("sbt.bat", args.map(x => `"${x}"`), { shell: true, ...options })
+        ? spawn("sbt.bat", args.map(x => `"${x.replace(/"/g, '""')}"`), { shell: true, ...options })
         : spawn("sbt", args, options);
 
     let fullOutput: string = '';
